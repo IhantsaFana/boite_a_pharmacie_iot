@@ -2,7 +2,7 @@
 // PROJET IOT — SÉCURITÉ + RTC DS3231
 // Migration Arduino Uno → ESP32-S3 N16R8
 // =====================================================
-// Composants : ESP32-S3 N16R8, Keypad 4x3, LED RGB
+// Composants : ESP32-S3 N16R8, Keypad 4x4, LED RGB
 //              Servo SG90, Buzzer actif, RTC DS3231
 // =====================================================
 // GPIO :
@@ -14,17 +14,17 @@
 //   RTC SDA    → GPIO 21
 //   RTC SCL    → GPIO 17
 //   Pavé R1-R4 → GPIO 1,2,4,6
-//   Pavé C1-C3 → GPIO 7,8,9
+//   Pavé C1-C4 → GPIO 7,8,9,11
 // =====================================================
 
 #include <Keypad.h>
-#include <ESP32Servo.h>    // ← ESP32Servo au lieu de Servo.h
+#include <ESP32Servo.h>
 #include <Wire.h>
 #include <RTClib.h>
 
 // ============== CONFIGURATION CLAVIER 4x4 ==============
 const byte ROWS = 4;
-const byte COLS = 4;       // ← 4 colonnes (pavé physique 4x4)
+const byte COLS = 4;
 
 char keys[ROWS][COLS] = {
   {'1', '2', '3', 'A'},
@@ -33,25 +33,23 @@ char keys[ROWS][COLS] = {
   {'*', '0', '#', 'D'}
 };
 
-byte rowPins[ROWS] = {1, 2, 4, 6};      // ← GPIO ESP32-S3
-byte colPins[COLS] = {7, 8, 9, 11};     // ← GPIO ESP32-S3 (11 pour C4)
+byte rowPins[ROWS] = {1, 2, 4, 6};
+byte colPins[COLS] = {7, 8, 9, 11};
 
 Keypad clavier = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 // ============== CONFIGURATION LED RGB ==============
-// ⚠️ LED anode commune : LOW = allumé, HIGH = éteint
-// ⚠️ ESP32-S3 : PWM via ledcSetup/ledcWrite
+// ⚠️ LED anode commune : 0 = allumé, 255 = éteint
 const int pinLED_Rouge = 13;
 const int pinLED_Vert  = 12;
 const int pinLED_Bleu  = 14;
 
 // ============== CONFIGURATION SERVO ==============
 Servo monServo;
-const int pinServo = 18;   // ← GPIO 18
+const int pinServo = 18;
 
 // ============== CONFIGURATION BUZZER ==============
-// ⚠️ Buzzer ACTIF : digitalWrite uniquement, pas tone()
-const int pinBuzzer = 5;   // ← GPIO 5
+const int pinBuzzer = 5;
 
 // ============== CONFIGURATION RTC ==============
 RTC_DS3231 rtc;
@@ -65,7 +63,7 @@ struct Rappel {
 
 Rappel rappels[] = {
   {8,  0,  "Matin"},
-  {14, 0,  "Midi"},
+  {13, 56,  "Midi"},
   {20, 0,  "Soir"},
 };
 const int NB_RAPPELS = 3;
@@ -77,18 +75,14 @@ bool   rappelEnCours     = false;
 int    dernierRappelMin  = -1;
 
 // ================================================================
-//  LED RGB — LEDC nouvelle API v3.x
-//  ← ledcSetup + ledcAttachPin supprimés en v3.x
-//  ← remplacés par ledcAttach(pin, freq, resolution)
-//  ← ledcWrite prend maintenant le pin directement (plus de canal)
+//  LED RGB — LEDC API v3.x
 // ================================================================
 void setupLED() {
-  ledcAttach(pinLED_Rouge, 5000, 8);  // ← nouvelle syntaxe v3.x
+  ledcAttach(pinLED_Rouge, 5000, 8);
   ledcAttach(pinLED_Vert,  5000, 8);
   ledcAttach(pinLED_Bleu,  5000, 8);
 }
 
-// Anode commune : 0 = allumé, 255 = éteint
 void eteindre_LED() {
   ledcWrite(pinLED_Rouge, 255);
   ledcWrite(pinLED_Vert,  255);
@@ -117,8 +111,6 @@ void led_Jaune() {
 
 // ================================================================
 //  BUZZER
-//  ← Remplace tone()/noTone() de l'Arduino Uno
-//  Buzzer ACTIF : HIGH = sonne, LOW = silence
 // ================================================================
 void bip(int duree_ms) {
   digitalWrite(pinBuzzer, HIGH);
@@ -142,11 +134,53 @@ void erreur_LED_Buzzer() {
   }
 }
 
+// ✅ MODIFIÉ — Sonne pendant 30 secondes avec LED jaune clignotante
+// L'utilisateur peut interrompre en appuyant sur n'importe quelle touche
 void bipRappel() {
-  // 3 bips montants = rappel médicament
-  bip(200); delay(100);
-  bip(200); delay(100);
-  bip(300);
+  Serial.println(">> Alarme rappel — 30 secondes");
+  unsigned long debut = millis();
+
+  while (millis() - debut < 30000) {
+    // Série de 3 bips
+    led_Jaune();
+    digitalWrite(pinBuzzer, HIGH); delay(200);
+    digitalWrite(pinBuzzer, LOW);  delay(150);
+
+    led_Jaune();
+    digitalWrite(pinBuzzer, HIGH); delay(200);
+    digitalWrite(pinBuzzer, LOW);  delay(150);
+
+    led_Jaune();
+    digitalWrite(pinBuzzer, HIGH); delay(300);
+    digitalWrite(pinBuzzer, LOW);
+    eteindre_LED();
+    delay(600); // pause entre chaque série
+
+    // Afficher le temps restant chaque 5 secondes
+    unsigned long ecoule = millis() - debut;
+    if (ecoule % 5000 < 100) {
+      Serial.print("Alarme dans ");
+      Serial.print((30000 - ecoule) / 1000);
+      Serial.println("s...");
+    }
+
+    // L'utilisateur peut arrêter l'alarme en appuyant sur une touche
+    char touche = clavier.getKey();
+    if (touche) {
+      Serial.println(">> Alarme interrompue par l'utilisateur");
+      eteindre_LED();
+      digitalWrite(pinBuzzer, LOW);
+      // Si c'est un chiffre, l'ajouter à la saisie
+      if (touche != '*' && touche != '#') {
+        saisieUtilisateur += touche;
+      }
+      break;
+    }
+  }
+
+  eteindre_LED();
+  digitalWrite(pinBuzzer, LOW);
+  Serial.println(">> Fin alarme — entrez votre PIN");
 }
 
 void bipAvertissement() {
@@ -160,7 +194,7 @@ void bipDemarrage() {
 }
 
 // ================================================================
-//  AFFICHAGE HEURE (moniteur série)
+//  AFFICHAGE HEURE
 // ================================================================
 void afficherHeure(DateTime now) {
   Serial.print(now.day());   Serial.print("/");
@@ -203,13 +237,8 @@ void verifierRappels(DateTime now) {
       Serial.println("Entrez votre code PIN pour ouvrir.");
       Serial.println("========================================");
 
-      for (int j = 0; j < 3; j++) {
-        led_Jaune();
-        bipRappel();
-        delay(500);
-        eteindre_LED();
-        delay(300);
-      }
+      // ✅ Sonne 30 secondes + LED jaune clignotante
+      bipRappel();
     }
   }
 }
@@ -288,13 +317,13 @@ void verifierCode() {
 //  SETUP
 // ================================================================
 void setup() {
-  Serial.begin(115200);   // ← 115200 au lieu de 9600 sur ESP32
+  Serial.begin(115200);
   delay(500);
 
-  Wire.begin(21, 17);     // ← SDA=21, SCL=17 (A4/A5 sur Arduino)
+  Wire.begin(21, 17);
 
   // LED
-  setupLED();             // ← ledcSetup (pas de pinMode nécessaire)
+  setupLED();
   eteindre_LED();
 
   // Buzzer
@@ -316,23 +345,21 @@ void setup() {
     Serial.println("RTC regle depuis heure compilation");
   }
 
-  // Démarrage
   Serial.println("========================================");
   Serial.println("   Boite a Pharmacie — ESP32-S3 N16R8");
   Serial.println("========================================");
   Serial.println("Code PIN : 1234");
-  Serial.println("'#' valider | '*' effacer | '*' 3s changer PIN");
+  Serial.println("'#' valider | '*' effacer");
   Serial.print("Rappels : ");
   for (int i = 0; i < NB_RAPPELS; i++) {
-    if (rappels[i].heure   < 10) Serial.print("0");
+    if (rappels[i].heure  < 10) Serial.print("0");
     Serial.print(rappels[i].heure); Serial.print("h");
-    if (rappels[i].minute  < 10) Serial.print("0");
+    if (rappels[i].minute < 10) Serial.print("0");
     Serial.print(rappels[i].minute); Serial.print(" ");
   }
   Serial.println();
   Serial.println("----------------------------------------");
 
-  // Séquence LED démarrage
   led_Rouge();  delay(300);
   led_Verte();  delay(300);
   led_Bleu();   delay(300);
@@ -351,10 +378,7 @@ void loop() {
   if (millis() - dernierAffichage >= 1000) {
     dernierAffichage = millis();
     afficherHeure(now);
-    if (rappelEnCours) {
-      Serial.print("  *** RAPPEL EN ATTENTE ***");
-      led_Jaune();
-    }
+    if (rappelEnCours) Serial.print("  *** RAPPEL EN ATTENTE ***");
     Serial.println();
   }
 
@@ -380,19 +404,3 @@ void loop() {
     }
   }
 }
-
-// ================================================================
-//  RÉSUMÉ DES CHANGEMENTS vs Arduino Uno
-// ================================================================
-/*
-  1. #include <Servo.h>       →  #include <ESP32Servo.h>
-  2. pinMode + digitalWrite   →  ledcSetup + ledcWrite  (LED)
-  3. tone() / noTone()        →  digitalWrite()         (buzzer actif)
-  4. Wire.begin()             →  Wire.begin(21, 17)     (I2C explicite)
-  5. Serial.begin(9600)       →  Serial.begin(115200)
-  6. GPIO 2,3,4,5 / 6,7,8,9  →  GPIO 1,2,4,6 / 7,8,9  (pavé)
-  7. PIN 10 servo             →  GPIO 18
-  8. PIN A0 buzzer            →  GPIO 5
-  9. PIN 11,12,13 LED         →  GPIO 13,12,14
-  10. PIN A4/A5 I2C           →  GPIO 21/17
-*/
