@@ -1,0 +1,120 @@
+<style>
+body{margin:0}
+.btn{padding:6px 16px;border-radius:8px;border:1px solid var(--color-border-secondary);background:var(--color-background-secondary);color:var(--color-text-primary);cursor:pointer;font-size:13px;transition:background .15s}
+.btn:hover{background:var(--color-background-tertiary)}
+.btn.active{background:var(--color-text-info);color:#fff;border-color:transparent}
+#info{font-size:13px;color:var(--color-text-secondary);text-align:center;margin:8px 0 0}
+#angle-label{font-size:13px;color:var(--color-text-secondary);text-align:center;margin:4px 0 8px}
+.controls{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:12px 0 4px}
+</style>
+
+<div class="controls">
+  <button class="btn active" onclick="setPos('repos')">Repos (fermé)</button>
+  <button class="btn" onclick="setPos('matin')">Matin — 08h00</button>
+  <button class="btn" onclick="setPos('midi')">Midi — 13h56</button>
+  <button class="btn" onclick="setPos('soir')">Soir — 20h00</button>
+</div>
+<div id="angle-label">Angle servo : 0°  |  Position : Repos (angle mort)</div>
+
+<svg id="svg" width="100%" viewBox="0 0 680 380">
+  <defs>
+    <clipPath id="clip-circle">
+      <circle cx="240" cy="190" r="145"/>
+    </clipPath>
+  </defs>
+
+  <!-- Plateau (groupe rotatif centré sur 240,190) -->
+  <g id="plateau" style="transform-origin:240px 190px;transform:rotate(0deg);transition:transform 0.8s cubic-bezier(.4,0,0.2,1)">
+
+    <!-- Fond du plateau -->
+    <circle cx="240" cy="190" r="145" fill="#D3D1C7" stroke="var(--color-border-secondary)" stroke-width="1"/>
+
+    <!-- ZONES MORTES (gris foncé) — 4 séparateurs de 30° chacun -->
+    <!-- Mort 1 : 0°–30° (repos, pointe en haut) -->
+    <path d="M240 190 L240 45 A145 145 0 0 1 312.5 63.5 Z" fill="#888780"/>
+    <!-- Mort 2 : 90°–120° -->
+    <path d="M240 190 L385 190 A145 145 0 0 1 312.5 316.5 Z" fill="#888780"/>
+    <!-- Mort 3 : 180°–210° -->
+    <path d="M240 190 L240 335 A145 145 0 0 1 167.5 316.5 Z" fill="#888780"/>
+    <!-- Mort 4 : 270°–300° -->
+    <path d="M240 190 L95 190 A145 145 0 0 1 167.5 63.5 Z" fill="#888780"/>
+
+    <!-- COMPARTIMENT MATIN : 30°–90° (60°) -->
+    <path d="M240 190 L312.5 63.5 A145 145 0 0 1 385 190 Z" fill="#FAC775" stroke="none"/>
+    <text x="320" y="155" text-anchor="middle" dominant-baseline="central" style="font-size:12px;font-weight:500;fill:#633806">Matin</text>
+
+    <!-- COMPARTIMENT MIDI : 120°–180° (60°) -->
+    <path d="M240 190 L312.5 316.5 A145 145 0 0 1 240 335 Z" fill="#9FE1CB" stroke="none"/>
+    <text x="300" y="300" text-anchor="middle" dominant-baseline="central" style="font-size:12px;font-weight:500;fill:#085041">Midi</text>
+
+    <!-- COMPARTIMENT SOIR : 210°–270° (60°) -->
+    <path d="M240 190 L167.5 316.5 A145 145 0 0 1 95 190 Z" fill="#F5C4B3" stroke="none"/>
+    <text x="150" y="300" text-anchor="middle" dominant-baseline="central" style="font-size:12px;font-weight:500;fill:#712B13">Soir</text>
+
+    <!-- Axe central -->
+    <circle cx="240" cy="190" r="14" fill="var(--color-background-secondary)" stroke="var(--color-border-primary)" stroke-width="1.5"/>
+    <circle cx="240" cy="190" r="5" fill="var(--color-text-secondary)"/>
+  </g>
+
+  <!-- COUVERCLE FIXE avec fenêtre d'accès (en haut, 0°) -->
+  <!-- Masque opaque couvrant tout sauf la fenêtre -->
+  <path d="M240 190 m-145 0 a145,145 0 1,1 290,0 a145,145 0 1,1 -290,0 Z
+           M240 190 L280 50 A145 145 0 0 0 200 50 Z"
+        fill="var(--color-background-primary)" opacity="0.92" clip-path="url(#clip-circle)"/>
+
+  <!-- Bordure couvercle -->
+  <circle cx="240" cy="190" r="145" fill="none" stroke="var(--color-border-primary)" stroke-width="2"/>
+
+  <!-- Fenêtre d'accès (découpe visible) -->
+  <path d="M240 190 L200 50 A145 145 0 0 1 280 50 Z" fill="none" stroke="#378ADD" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="240" y="36" text-anchor="middle" style="font-size:11px;fill:#185FA5;font-weight:500">Fenêtre fixe</text>
+  <text x="240" y="50" text-anchor="middle" style="font-size:10px;fill:#378ADD">(ouverture accès)</text>
+
+  <!-- Légende droite -->
+  <rect x="430" y="60" width="14" height="14" rx="3" fill="#FAC775" stroke="#BA7517" stroke-width="0.5"/>
+  <text x="450" y="71" class="ts" style="font-size:12px;fill:var(--color-text-primary)">Compartiment actif (60°)</text>
+
+  <rect x="430" y="84" width="14" height="14" rx="3" fill="#888780"/>
+  <text x="450" y="95" style="font-size:12px;fill:var(--color-text-primary)">Angle mort (30°)</text>
+
+  <line x1="430" y1="118" x2="444" y2="118" stroke="#378ADD" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="450" y="122" style="font-size:12px;fill:var(--color-text-primary)">Fenêtre d'accès fixe</text>
+
+  <!-- Schéma angles -->
+  <text x="430" y="160" style="font-size:12px;font-weight:500;fill:var(--color-text-primary)">Positions servo :</text>
+  <text x="430" y="178" style="font-size:11px;fill:var(--color-text-secondary)">Repos   →   0°</text>
+  <text x="430" y="194" style="font-size:11px;fill:#BA7517">Matin   →  45°</text>
+  <text x="430" y="210" style="font-size:11px;fill:#0F6E56">Midi    → 105°</text>
+  <text x="430" y="226" style="font-size:11px;fill:#993C1D">Soir    → 165°</text>
+
+  <text x="430" y="258" style="font-size:11px;fill:var(--color-text-tertiary)">Chaque compartiment = 60°</text>
+  <text x="430" y="274" style="font-size:11px;fill:var(--color-text-tertiary)">Chaque angle mort = 30°</text>
+  <text x="430" y="290" style="font-size:11px;fill:var(--color-text-tertiary)">Total = 4×30° + 3×60° = 300°</text>
+  <text x="430" y="306" style="font-size:11px;fill:var(--color-text-tertiary)">Restant (repos) = 60° inactif</text>
+
+  <!-- Indicateur flèche servo -->
+  <g id="arrow-indicator">
+    <line x1="240" y1="190" x2="240" y2="60" stroke="#E24B4A" stroke-width="2" stroke-linecap="round"/>
+    <polygon points="240,50 234,64 246,64" fill="#E24B4A"/>
+  </g>
+</svg>
+
+<div id="info">Le plateau est en position fermée — aucun compartiment aligné avec la fenêtre</div>
+
+<script>
+const positions = {
+  repos: { angle: 0,   servoAngle: 0,   label: 'Repos (angle mort)',        info: 'Le plateau est en position fermée — aucun compartiment aligné avec la fenêtre', color: '#888780' },
+  matin: { angle: -45, servoAngle: 45,  label: 'Matin — 45°',              info: 'Compartiment Matin aligné avec la fenêtre — accessible après code PIN', color: '#BA7517' },
+  midi:  { angle: -105,servoAngle: 105, label: 'Midi — 105°',              info: 'Compartiment Midi aligné avec la fenêtre — accessible après code PIN', color: '#0F6E56' },
+  soir:  { angle: -165, servoAngle: 165, label: 'Soir — 165°',             info: 'Compartiment Soir aligné avec la fenêtre — accessible après code PIN', color: '#993C1D' },
+};
+
+function setPos(key) {
+  const p = positions[key];
+  document.getElementById('plateau').style.transform = `rotate(${p.angle}deg)`;
+  document.getElementById('info').textContent = p.info;
+  document.getElementById('angle-label').textContent = `Angle servo : ${p.servoAngle}°  |  Position : ${p.label}`;
+  document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+</script>

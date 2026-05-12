@@ -3,14 +3,15 @@
 // Migration Arduino Uno → ESP32-S3 N16R8
 // =====================================================
 // Composants : ESP32-S3 N16R8, Keypad 4x4, LED RGB
-//              Servo SG90, Buzzer actif, RTC DS3231
+//              2× Servo SG90 (verrou + plateau), Buzzer, RTC DS3231
 // =====================================================
 // GPIO :
 //   LED Rouge  → GPIO 13
 //   LED Vert   → GPIO 12
 //   LED Bleu   → GPIO 14
 //   Buzzer     → GPIO 5
-//   Servo      → GPIO 18
+//   Servo verrou   → GPIO 18
+//   Servo plateau  → GPIO 19 (angles : plateau_rotatif_geometrie.html)
 //   RTC SDA    → GPIO 21
 //   RTC SCL    → GPIO 17
 //   Pavé R1-R4 → GPIO 1,2,4,6
@@ -48,6 +49,15 @@ const int pinLED_Bleu  = 14;
 Servo monServo;
 const int pinServo = 18;
 
+// Plateau rotatif (géométrie : repos 0°, Matin 45°, Midi 105°, Soir 165°)
+Servo servoPlateau;
+const int pinServoPlateau = 19;
+const int PLATEAU_REPOS = 0;
+const int PLATEAU_MATIN = 45;
+const int PLATEAU_MIDI  = 105;
+const int PLATEAU_SOIR  = 165;
+const unsigned long DELAI_PLATEAU_MS = 500;
+
 // ============== CONFIGURATION BUZZER ==============
 const int pinBuzzer = 5;
 
@@ -64,7 +74,7 @@ struct Rappel {
 Rappel rappels[] = {
   {8,  0,  "Matin"},
   {13, 56,  "Midi"},
-  {20, 0,  "Soir"},
+  {18, 0,  "Soir"},
 };
 const int NB_RAPPELS = 3;
 
@@ -73,6 +83,35 @@ const String code        = "1234";
 String saisieUtilisateur = "";
 bool   rappelEnCours     = false;
 int    dernierRappelMin  = -1;
+long   dernierJourResetMinuit = -1;
+
+// ================================================================
+//  SERVO PLATEAU (alignement compartiment / fenêtre fixe)
+// ================================================================
+int anglePlateauPourIndexRappel(int indexRappel) {
+  switch (indexRappel) {
+    case 0: return PLATEAU_MATIN;
+    case 1: return PLATEAU_MIDI;
+    case 2: return PLATEAU_SOIR;
+    default: return PLATEAU_REPOS;
+  }
+}
+
+void plateauVersAngle(int angleDeg) {
+  servoPlateau.write(angleDeg);
+  delay(DELAI_PLATEAU_MS);
+}
+
+void verifierResetPlateauMinuit(DateTime now) {
+  if (now.hour() != 0 || now.minute() != 0 || now.second() != 0)
+    return;
+  long cleJour = (long)now.year() * 10000L + (long)now.month() * 100L + (long)now.day();
+  if (cleJour == dernierJourResetMinuit)
+    return;
+  dernierJourResetMinuit = cleJour;
+  Serial.println(">> Minuit — plateau → position Matin (45 deg)");
+  plateauVersAngle(PLATEAU_MATIN);
+}
 
 // ================================================================
 //  LED RGB — LEDC API v3.x
@@ -237,6 +276,12 @@ void verifierRappels(DateTime now) {
       Serial.println("Entrez votre code PIN pour ouvrir.");
       Serial.println("========================================");
 
+      int ang = anglePlateauPourIndexRappel(i);
+      Serial.print(">> Plateau → ");
+      Serial.print(ang);
+      Serial.println(" deg");
+      plateauVersAngle(ang);
+
       // ✅ Sonne 30 secondes + LED jaune clignotante
       bipRappel();
     }
@@ -283,6 +328,10 @@ void ouvrirBoite() {
   monServo.write(0);
   Serial.println(">> Servo : 90 -> 0 deg");
   Serial.println("=== BOITE REVERROUILEE ===");
+  Serial.print(">> Plateau → repos (angle mort) ");
+  Serial.print(PLATEAU_REPOS);
+  Serial.println(" deg");
+  plateauVersAngle(PLATEAU_REPOS);
   eteindre_LED();
   saisieUtilisateur = "";
 }
@@ -330,9 +379,12 @@ void setup() {
   pinMode(pinBuzzer, OUTPUT);
   digitalWrite(pinBuzzer, LOW);
 
-  // Servo
+  // Servos
   monServo.attach(pinServo);
   monServo.write(0);
+  servoPlateau.attach(pinServoPlateau);
+  servoPlateau.write(PLATEAU_REPOS);
+  delay(DELAI_PLATEAU_MS);
 
   // RTC
   if (!rtc.begin()) {
@@ -358,6 +410,7 @@ void setup() {
     Serial.print(rappels[i].minute); Serial.print(" ");
   }
   Serial.println();
+  Serial.println("Plateau GPIO 19 : repos 0 / Matin 45 / Midi 105 / Soir 165");
   Serial.println("----------------------------------------");
 
   led_Rouge();  delay(300);
@@ -384,6 +437,7 @@ void loop() {
 
   // Vérifier les rappels
   verifierRappels(now);
+  verifierResetPlateauMinuit(now);
 
   // Lecture pavé
   char touche = clavier.getKey();
